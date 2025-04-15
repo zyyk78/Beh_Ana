@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import re
-from collections import defaultdict
 
 class EventProcessor:
     def __init__(self):
@@ -27,7 +26,15 @@ class EventProcessor:
         
         # 检查是否是开始事件
         if "Start to Detect Lick" in content and not self.in_event:
-            self.current_event = defaultdict(list)
+            self.current_event = {
+                'Time_Range_second': [],
+                'ROmL': [],
+                'ROmR': [],
+                'SlnL': [],
+                'SlnR': [],
+                'ModL': [],
+                'ModR': []
+            }
             self.in_event = True
             self.event_start_time = timestamp 
             return
