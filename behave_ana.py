@@ -1,4 +1,4 @@
-def sort_events(Event,ignore_list=None,long_event=None):
+def sort_events(Event,ignore_list=[],long_event=[]):
     """提取事件的开始时间并进行排序
 
     Args:
@@ -10,19 +10,21 @@ def sort_events(Event,ignore_list=None,long_event=None):
     """    
     eve_list=[]
     for i in Event:
-        if 'Time_S' in Event[i] and 'Time_E' in Event[i] and not i in ignore_list:
-            if i in long_event:
-                for timestamp in Event[i]['Time_S']:
-                    eve_list.append((timestamp,i+'_S'))
-                for timestamp in Event[i]['Time_E']:
-                    eve_list.append((timestamp,i+'_E'))    
-            else:
-                for timestamp in Event[i]['Time_S']:
-                    eve_list.append((timestamp,i))    
+        if not i in ignore_list:
+            if 'Time_S' in Event[i] and 'Time_E' in Event[i] :
+                if i in long_event:
+                    for timestamp in Event[i]['Time_S']:
+                        eve_list.append((timestamp,i+'_S'))
+                    for timestamp in Event[i]['Time_E']:
+                        eve_list.append((timestamp,i+'_E'))    
+                else:
+                    for timestamp in Event[i]['Time_S']:
+                        eve_list.append((timestamp,i))    
     eve_list.sort(key=lambda x: x[0])
+    
     return eve_list
 
-def reward_rate(Event,window=[0,-1]):
+def reward_rate(Event,window=(0,-1)):
     """计算两边和总体的奖励比例(如果Event中出现了Blackhol关键字则会自动应用)
 
     Args:
@@ -35,18 +37,23 @@ def reward_rate(Event,window=[0,-1]):
     cal_list=['SlnL','SlnR','ROmL','ROmR']
     Event_trunc={}
     if 'Blackhole' in Event:
-        for i in cal_list:
-            Event_trunc[i]=Event[i]['Time_S']
-            for j in Event['Blackhole']:
-                Event_trunc[i]=fixing.truncate(Event_trunc[i],j,'inner')
-            Event_trunc[i]=fixing.truncate(Event_trunc[i],window)
+        if not Event['Blackhole']['Time_S']==[]:
+            for i in cal_list:
+                Event_trunc[i]=Event[i]['Time_S']
+                for j in range(len(Event['Blackhole']['Time_S'])):
+                    Event_trunc[i]=fixing.truncate(Event_trunc[i],(Event['Blackhole']['Time_S'][j],Event['Blackhole']['Time_E'][j]),'inner')
+                Event_trunc[i]=fixing.truncate(Event_trunc[i],window)
+        else:
+            for i in cal_list:
+                Event_trunc[i]=Event[i]['Time_S']
+                Event_trunc[i]=fixing.truncate(Event_trunc[i],window)
     else:
         for i in cal_list:
             Event_trunc[i]=Event[i]['Time_S']
             Event_trunc[i]=fixing.truncate(Event_trunc[i],window)
             
-    L=len(Event_trunc['SlnL'])/(len(Event_trunc['ROmL'])+len(Event_trunc['SlnL']))
-    R=len(Event_trunc['SlnR'])/(len(Event_trunc['ROmR'])+len(Event_trunc['SlnR']))
+    L=len(Event_trunc['SlnL'])/(len(Event_trunc['ROmL'])+len(Event_trunc['SlnL'])) if (len(Event_trunc['ROmL'])+len(Event_trunc['SlnL'])) >0 else 0
+    R=len(Event_trunc['SlnR'])/(len(Event_trunc['ROmR'])+len(Event_trunc['SlnR'])) if (len(Event_trunc['ROmR'])+len(Event_trunc['SlnR'])) >0 else 0
     T=(len(Event_trunc['SlnR'])+len(Event_trunc['SlnL']))/(len(Event_trunc['ROmL'])+len(Event_trunc['SlnL'])+len(Event_trunc['ROmR'])+len(Event_trunc['SlnR']))
     return L,R,T
 
@@ -55,15 +62,20 @@ def transform_sequence(eve_list):
     
     Args:
         eve_list: 原始序列，格式为[[TimeStamp, Event], ...]
-    
     Returns:
         list: 转换后的序列，每个元素为(is_correct, correct_side,reward_or_not)
     """
     transformed_eve_list = []
     current_correct_side = None
     in_blackhole = False
-    
-    for timestamp, event in eve_list:
+    find_mod=False
+    for _,event in eve_list:
+        if event=='ModL' or event=='ModR':
+            find_mod=True
+            break
+    if not find_mod:
+        current_correct_side='L'
+    for _,event in eve_list:
         if event == 'Blackhole_S':
             in_blackhole = True
             current_correct_side=None
@@ -92,17 +104,22 @@ def transform_sequence(eve_list):
     
     return transformed_eve_list
 
-def accuracy_rate(eve_list):
+def accuracy_rate(eve_list,window=(0,-1)):
     """计算两边和总体的正确比例(如果Event中出现了Blackhol关键字则会自动应用)
     
     Args:
         eve_list: 排好的时间序列
-    
+        window(list): trial数窗口
     Returns:
         tuple(int,int,int):左右总体的正确比例
     """
     LC, LW, RC, RW = 0, 0, 0, 0
-    tr_eve_list=transform_sequence(eve_list)
+    tr_eve_list=transform_sequence(eve_list)  #(is_correct, correct_side,reward_or_not)
+    count=0
+    if window[1]==-1:
+        tr_eve_list=[tr_eve_list[i] for i in range(window[0],len(tr_eve_list))]
+    else:
+        tr_eve_list=[tr_eve_list[i] for i in range(window[0],min(len(tr_eve_list),window[1]))]
     for is_correct, correct_side,_ in tr_eve_list:
         if correct_side == 'L':
             if is_correct:
@@ -114,7 +131,9 @@ def accuracy_rate(eve_list):
                 RC += 1
             else:
                 RW += 1
-    
+    if window[1] != -1:
+        if len(tr_eve_list) < window[1]-window[0]:
+            return None,None,None
     # 计算正确率
     L = LC / (LC + LW) if (LC + LW) > 0 else 0
     R = RC / (RC + RW) if (RC + RW) > 0 else 0
@@ -129,32 +148,27 @@ def analyze_switching_patterns(transformed_sequence):
         transformed_sequence: 转换后的序列，格式为[[is_correct, correct_side], ...]
     
     Returns:
-        list: 切换模式列表，每个元素形如 [5, -7, 20]
-              (正数表示L→R切换，负数表示R→L切换，数值表示延迟次数)
+        list: 切换模式列表，每个元素形如 [5, -7, 20],(正数表示正确切换，负数表示错误切换，数值表示从上次切换mod之后的trial次数)
     """
     if not transformed_sequence:
         return []
     
     switch_pattern = []
-    current_side = transformed_sequence[0][1]  # 初始正确侧
-    count_since_last_switch = 0
-    
+    count = 0
+    current_state=False #默认是错误边开始
     for is_correct, correct_side in transformed_sequence:
-        count_since_last_switch += 1
-        
+        count += 1
         # 检测模式切换
-        if correct_side != current_side:
-            # 确定切换方向 (L→R为正，R→L为负)
-            switch_value = count_since_last_switch if current_side == 'L' else -count_since_last_switch
+        if is_correct != current_state:
+            # 确定切换方向
+            switch_value = count if is_correct  else -count
             switch_pattern.append(switch_value)
             
-            # 重置计数器
-            current_side = correct_side
-            count_since_last_switch = 0
+            current_state = is_correct
     
     return switch_pattern
 
-def get_all_switching_patterns(eve_list):
+def get_switching_latency(eve_list):
     """获取所有Mod阶段的切换模式
     
     Args:
@@ -165,7 +179,6 @@ def get_all_switching_patterns(eve_list):
     """
     # 首先转换整个序列
     transformed = transform_sequence(eve_list)
-    
     # 然后分割成不同的Mod阶段
     mod_phases = []
     current_phase = []
@@ -181,7 +194,7 @@ def get_all_switching_patterns(eve_list):
     
     if current_phase:  # 添加最后一个phase
         mod_phases.append(current_phase)
-    
+        
     # 分析每个Mod阶段的切换模式
     all_patterns = []
     for phase in mod_phases:
@@ -191,3 +204,84 @@ def get_all_switching_patterns(eve_list):
     
     return all_patterns
 
+
+def get_switch_sequence(eve_list,lenth=5):
+    transformed = transform_sequence(eve_list)  #(is_correct, correct_side,reward_or_not)
+    switch_rewards = []
+    previous_choice = None  # 用于记录上一次的实际选择
+    
+    for i in range(1, len(transformed)):
+        current_is_correct, current_correct_side, current_reward = transformed[i]
+        previous_is_correct, previous_correct_side, previous_reward = transformed[i-1]
+        
+        # 确定当前和上一次的实际选择
+        current_actual_choice = current_correct_side if current_is_correct else ('L' if current_correct_side == 'R' else 'R')
+        previous_actual_choice = previous_correct_side if previous_is_correct else ('L' if previous_correct_side == 'R' else 'R')
+        
+        # 如果是第一次迭代，只记录previous_choice
+        if previous_choice is None:
+            previous_choice = previous_actual_choice
+            continue
+        
+        # 检查是否发生了切换
+        if current_actual_choice != previous_choice:
+            # 收集前5条数据的reward_or_not
+            rewards_before_switch = []
+            for j in range(max(0, i-lenth), i):  # 确保不越界
+                rewards_before_switch.append(1 if transformed[j][2] else 0)
+            if len(rewards_before_switch)==lenth:
+                switch_rewards.append(rewards_before_switch)
+        
+        # 更新previous_choice
+        previous_choice = current_actual_choice
+    
+    return switch_rewards
+
+def get_random_ns_sequence(eve_list,lenth=5,num_get=50):
+    import random
+    transformed = transform_sequence(eve_list)  #(is_correct, correct_side,reward_or_not)
+    non_switch_rewards = []
+    previous_choice = None  # 用于记录上一次的实际选择
+    
+    for i in range(1, len(transformed)):
+        current_is_correct, current_correct_side, current_reward = transformed[i]
+        previous_is_correct, previous_correct_side, previous_reward = transformed[i-1]
+        
+        # 确定当前和上一次的实际选择
+        current_actual_choice = current_correct_side if current_is_correct else ('L' if current_correct_side == 'R' else 'R')
+        previous_actual_choice = previous_correct_side if previous_is_correct else ('L' if previous_correct_side == 'R' else 'R')
+        
+        # 如果是第一次迭代，只记录previous_choice
+        if previous_choice is None:
+            previous_choice = previous_actual_choice
+            continue
+        
+        # 检查是否发生了切换
+        if current_actual_choice == previous_choice:
+            # 收集前5条数据的reward_or_not
+            rewards_before_switch = []
+            for j in range(max(0, i-lenth), i):  # 确保不越界
+                rewards_before_switch.append(1 if transformed[j][2] else 0)
+            if len(rewards_before_switch)==lenth:
+                non_switch_rewards.append(rewards_before_switch)
+        
+        # 更新previous_choice
+        previous_choice = current_actual_choice
+    if len(non_switch_rewards) > num_get:
+        non_switch_rewards=random.sample(non_switch_rewards,num_get)
+    return non_switch_rewards  
+  
+def switch_bayes_reg(sw_seq,ns_seq):
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import accuracy_score
+    import numpy as np
+    x_input=np.array(sw_seq+ns_seq)
+    y_input=np.array([1 for i in range(len(sw_seq))]+[0 for i in range(len(ns_seq))])
+    model = LogisticRegression()
+    model.fit(x_input,y_input)
+    weights = model.coef_
+    bias = model.intercept_
+    y_pred=model.predict(x_input)
+    acc = accuracy_score(y_input, y_pred)
+    return weights,bias,acc
+#def autoreg_event(eve_list):

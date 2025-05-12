@@ -171,6 +171,7 @@ def truncate(Event_S,truncate_time,remove_region = 'outer'):
         for i in Event_S:
             if i >= truncate_time[0] and i <=truncate_time[1]:
                 Event_S.remove(i)
+
     else :
         print('Unsupported side mode! Return ')
     return Event_S
@@ -723,23 +724,23 @@ def fixing(Event,delta1=25000,delta2=25000,com_file_path=None,matched_row=None):
                 Event['ModR']['Time_S'] = [x+addtime*2 for x in Event['ModR']['Time_S']]  # 添加一个时差  用于排序
                 if not missing_ranges==[]:
                     Event['ModR']['Time_S'].extend(missing_events)
-                    Event['ModR']['Time_S'].sort()
-                    
-        min_time = Event['SlnL']['Time_S'][0]        
+                    Event['ModR']['Time_S'].sort()      
+        min_time = 0x7fffffff 
         for i in fix_ref:
-            min_time = min(min_time,Event[i]['Time_S'][0])
-            if Event[i]['Time_E']==[]:
-                Event[i]['Time_S'] = [x+addtime for x in Event[i]['Time_S']]    # 添加一个时差  用于排序
-                
-        if  Event['ModL']['Time_S'][0]>min_time and Event['ModL']['Time_S'][0] > min_time:  # 如果Mod的第一位的时差没控制好 就重新移动一下
-            if Event['ModL']['Time_S'][0] < Event['ModL']['Time_S'][0]:
-                if Event['ModL']['Time_S'][0] - min_time<500000: 
-                    Event['ModL']['Time_S'][0] = max(0,min_time - 2*addtime)  # 如果是吸附错误 就把这边移动一下
-                else:
-                    Event['ModR']['Time_S'].insert(0,max(0,min_time - 2*addtime) )  #如果是掉了信号 就把对侧移动一下
-            else: 
-                if Event['ModR']['Time_S'][0] - min_time<500000: 
-                    Event['ModR']['Time_S'][0] = max(0,min_time - 2*addtime)  # 如果是吸附错误 就把这边移动一下
-                else:
-                    Event['ModL']['Time_S'].insert(0,max(0,min_time - 2*addtime) )  #如果是掉了信号 就把对侧移动一下    
+            if Event[i]['Time_S']!=[]:
+                min_time = min(min_time,Event[i]['Time_S'][0])
+                if Event[i]['Time_E']==[]:
+                    Event[i]['Time_S'] = [x+addtime for x in Event[i]['Time_S']]    # 添加一个时差  用于排序
+        if Event['ModL']['Time_E']!=[] and Event['ModR']['Time_E'] !=[]:     
+            if  Event['ModL']['Time_S'][0]>min_time and Event['ModL']['Time_S'][0] > min_time:  # 如果Mod的第一位的时差没控制好 就重新移动一下
+                if Event['ModL']['Time_S'][0] < Event['ModL']['Time_S'][0]:
+                    if Event['ModL']['Time_S'][0] - min_time<500000: 
+                        Event['ModL']['Time_S'][0] = max(0,min_time - 2*addtime)  # 如果是吸附错误 就把这边移动一下
+                    else:
+                        Event['ModR']['Time_S'].insert(0,max(0,min_time - 2*addtime) )  #如果是掉了信号 就把对侧移动一下
+                else: 
+                    if Event['ModR']['Time_S'][0] - min_time<500000: 
+                        Event['ModR']['Time_S'][0] = max(0,min_time - 2*addtime)  # 如果是吸附错误 就把这边移动一下
+                    else:
+                        Event['ModL']['Time_S'].insert(0,max(0,min_time - 2*addtime) )  #如果是掉了信号 就把对侧移动一下    
     return Event
