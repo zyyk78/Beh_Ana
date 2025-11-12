@@ -484,6 +484,10 @@ def fixing(Event,delta1=25000,delta2=25000,com_file_path=None,matched_row=None):
     Returns:
         dict: 修正过的Event
     """    #主入口  
+    import os
+    import log_processer
+    import numpy as np
+    
     addtime=500
     bol_fix=False   
     
@@ -512,7 +516,6 @@ def fixing(Event,delta1=25000,delta2=25000,com_file_path=None,matched_row=None):
     if len(too_long_events)>0:
         print(f'Too long event detected!{too_long_events}')   
 
-
     for i in fix_ref:
         if Event[i]['Time_E']==[]:
             bol_fix=True   #是否需要修复
@@ -523,10 +526,7 @@ def fixing(Event,delta1=25000,delta2=25000,com_file_path=None,matched_row=None):
     if not bol_fix:
         print('No missing event, skipping fixing')
         return Event
-    
-    import os
-    import log_processer
-    import numpy as np
+
     
     if  os.path.exists(com_file_path):
         Com_Events=log_processer.process_log_file(com_file_path)
@@ -549,7 +549,8 @@ def fixing(Event,delta1=25000,delta2=25000,com_file_path=None,matched_row=None):
     else:
         print(f"Warning: Log file {com_file_path} does not exist. Cannot process log events.")
         Com_Events=None
-    
+        Event['tMod']=input(f"Please input one-letter training mode: ")
+        
     if Event['tMod'] == 'P':      #P模式下清理可能残存的信息
         Event['ModL']['Time_S'] = []
         Event['ModR']['Time_S'] = []
