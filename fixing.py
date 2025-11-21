@@ -533,8 +533,8 @@ def fixing(Event,delta1=25000,delta2=25000,com_file_path=None,matched_row=None):
         com_Event = None
         if matched_row.empty:
             print(f"Warning: No matching row found in README.xlsx.")
-            event_num=input(f"Please input the event number of event: ")
-            com_Event=Com_Events(event_num)       #没有csv,需要指定事件编号
+            event_num=int(input(f"Please input the event number of event: ")) - 1
+            com_Event=Com_Events[event_num]      #没有csv,需要指定事件编号
             Event['tMod']=input(f"Please input one-letter training mode: ")
         else:
             rec_start_time = (matched_row.iloc[0, 6].hour*3600+matched_row.iloc[0, 6].minute*60+matched_row.iloc[0, 6].second)
