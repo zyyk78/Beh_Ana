@@ -1,3 +1,4 @@
+import numpy as np
 def sort_events(Event,ignore_list=[],long_event=[]):
     """提取事件的开始时间并进行排序
 
@@ -65,7 +66,7 @@ def transform_sequence(eve_list):
     Returns:
         list: 转换后的序列，每个元素为(is_correct, correct_side,reward_or_not)
     """
-    transformed_eve_list = []
+    trial_sequence = []
     current_correct_side = None
     in_blackhole = False
     find_mod=False
@@ -79,7 +80,7 @@ def transform_sequence(eve_list):
         if event == 'Blackhole_S':
             in_blackhole = True
             current_correct_side=None
-            transformed_eve_list.append((False,'E',False))
+            trial_sequence.append((False,'E',False))
             continue
         
         if event == 'Blackhole_E':
@@ -100,9 +101,9 @@ def transform_sequence(eve_list):
             choice = event[-1]  # 'L' 或 'R'
             result = True if event.startswith('Sln') else False
             is_correct = (choice == current_correct_side)
-            transformed_eve_list.append((is_correct, current_correct_side,result))
+            trial_sequence.append((is_correct, current_correct_side,result))
     
-    return transformed_eve_list
+    return trial_sequence
 
 def accuracy_rate(eve_list,window=(0,-1)):
     """计算两边和总体的正确比例(如果Event中出现了Blackhol关键字则会自动应用)
@@ -141,22 +142,22 @@ def accuracy_rate(eve_list,window=(0,-1)):
     
     return L,R,T
 
-def analyze_switching_patterns(transformed_sequence):
+def analyze_switching_patterns(trial_sequence):
     """分析模式切换模式（基于转换后的序列）
     
     Args:
-        transformed_sequence: 转换后的序列，格式为[[is_correct, correct_side], ...]
+        trial_sequence: 转换后的序列，格式为[[is_correct, correct_side], ...]
     
     Returns:
         list: 切换模式列表，每个元素形如 [5, -7, 20],(正数表示正确切换，负数表示错误切换，数值表示从上次切换mod之后的trial次数)
     """
-    if not transformed_sequence:
+    if not trial_sequence:
         return []
     
     switch_pattern = []
     count = 0
     current_state=False #默认是错误边开始
-    for is_correct, correct_side in transformed_sequence:
+    for is_correct, correct_side in trial_sequence:
         count += 1
         # 检测模式切换
         if is_correct != current_state:
@@ -284,4 +285,46 @@ def switch_bayes_reg(sw_seq,ns_seq):
     y_pred=model.predict(x_input)
     acc = accuracy_score(y_input, y_pred)
     return weights,bias,acc
-#def autoreg_event(eve_list):
+
+def learning_auc(trial_sequence):
+    is_correct = np.array([t[0] for t in trial_sequence])
+
+    cum_correct = np.cumsum(is_correct)
+    trials = np.arange(1, len(is_correct) + 1)
+
+    cum_accuracy = cum_correct / trials
+    x = trials / trials[-1]  # 归一化到 [0,1]
+
+    auc = np.trapz(cum_accuracy, x)
+    return auc
+
+def cumulative_attempt_auc(eve_list):
+    attempt_events = {"SlnL", "SlnR", "ROmL", "ROmR"}
+    attempts = [
+        (t, e) for t, e in eve_list
+        if e in attempt_events
+    ]
+
+    if len(attempts) < 2:
+        return np.nan
+
+    times = np.array([t for t, _ in attempts])
+
+    t0 = times[0]
+    t1 = times[-1]
+
+    x = (times - t0) / (t1 - t0)        # 归一化时间
+    y = np.arange(1, len(times) + 1)    # 累计尝试数
+    y = y / y[-1]                       # 归一化累计尝试
+
+    auc = np.trapz(y, x)
+    return auc
+
+def log_lr(eve_list, alpha=0.5):
+    left_events  = {"SlnL", "ROmL"}
+    right_events = {"SlnR", "ROmR"}
+    n_left = sum(1 for _, e in eve_list if e in left_events)
+    n_right = sum(1 for _, e in eve_list if e in right_events)
+
+    return np.log((n_left + alpha) / (n_right + alpha))
+            
