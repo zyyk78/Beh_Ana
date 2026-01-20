@@ -49,17 +49,17 @@ def extract_event(st_event_data, bits):
 def ParseEvent(event_fn, st_events_bits=None):
     if st_events_bits is None:
         st_events_bits = {
-            'CamT'  :[1 , 0],
-            'LickL' :[3 , 0],
-            'LickR' :[18, 0],
-            'SlnR'  :[23, 0],
-            'SlnL'  :[24, 0],
-            'ROmL'  :[22, 0],
-            'ROmR'  :[21, 0],
-            'ModL'  :[17, 0],
-            'ModR'  :[12, 0],
-            'MinS'  :[9 , 1],
-            'MinT'  :[15, 0]
+            'CamT'  :[1 , 0], #Basler Camera Trigger
+            'LickL' :[3 , 0], #Licking touch panel left
+            'LickR' :[18, 0], #Licking touch panel right
+            'SlnR'  :[23, 0], #Solenoid valve right (Rewarde Trial)
+            'SlnL'  :[24, 0], #Solenoid valve left (Rewarde Trial)
+            'ROmL'  :[22, 0], #Reward ommission left (Unreward Trial)
+            'ROmR'  :[21, 0], #Reward ommission right (Unreward Trial)
+            'ModL'  :[17, 0], #High prob side (Correct side) to left
+            'ModR'  :[12, 0], #High prob side (Correct side) to right
+            'MinS'  :[9 , 1], #Miniscope frame
+            'MinT'  :[15, 0]  #Miniscope trigger
         }
 
     st_event_data = read_event_file(event_fn)

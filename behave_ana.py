@@ -327,4 +327,85 @@ def log_lr(eve_list, alpha=0.5):
     n_right = sum(1 for _, e in eve_list if e in right_events)
 
     return np.log((n_left + alpha) / (n_right + alpha))
+
+from bisect import bisect_left, bisect_right
+
+# def licking_rate(Event, eve_list):
+#     event_map = {'SlnL': 'reward','SlnR': 'reward','ROmL': 'noreward','ROmR': 'noreward'}
+#     valid_events = list(event_map.keys())
+    
+#     all_timestamps = [t for t, _ in eve_list]
+#     time_scale = 1000.0 if (len(all_timestamps) > 0 and max(all_timestamps) > 100000) else 1.0
+
+#     filtered_events = []
+#     for timestamp, eve_name in eve_list:
+#         if eve_name in valid_events:
+#             filtered_events.append( (timestamp/time_scale, event_map[eve_name]) )
+
+#     all_lick_times = []
+#     if 'LickL' in Event and 'Time_S' in Event['LickL'] and Event['LickL']['Time_S']:
+#         lickL_times = [t/time_scale for t in Event['LickL']['Time_S']]
+#         all_lick_times.extend(lickL_times)
+#     if 'LickR' in Event and 'Time_S' in Event['LickR'] and Event['LickR']['Time_S']:
+#         lickR_times = [t/time_scale for t in Event['LickR']['Time_S']]
+#         all_lick_times.extend(lickR_times)
+#     all_lick_times.sort()
+
+#     reward_lick_counts = []
+#     noreward_lick_counts = []
+#     for i in range(len(filtered_events)-1):
+#         curr_ts, curr_type = filtered_events[i]
+#         next_ts, _ = filtered_events[i+1]
+#         start_idx = bisect_left(all_lick_times, curr_ts)
+#         end_idx = bisect_left(all_lick_times, next_ts)
+#         lick_count = end_idx - start_idx
+        
+#         if curr_type == 'reward':
+#             reward_lick_counts.append(lick_count)
+#         else:
+#             noreward_lick_counts.append(lick_count)
+
+#     avg_licks_reward = np.mean(reward_lick_counts) if reward_lick_counts else 0
+#     avg_licks_noreward = np.mean(noreward_lick_counts) if noreward_lick_counts else 0
+#     total_lick_events = len(reward_lick_counts) + len(noreward_lick_counts)
+
+#     return avg_licks_reward, avg_licks_noreward, total_lick_events
             
+
+def licking_rate(Event, eve_list):    
+    event_map = {'SlnL':'reward', 'SlnR':'reward', 'ROmL':'noreward', 'ROmR':'noreward'}
+    valid_events = list(event_map.keys())
+    
+    all_timestamps = [t for t, _ in eve_list]
+    time_scale = 1000.0 if (len(all_timestamps) > 0 and max(all_timestamps) > 100000) else 1.0
+    
+    filtered_events = []
+    for timestamp, eve_name in eve_list:
+        if eve_name in valid_events:
+            filtered_events.append( (timestamp/time_scale, event_map[eve_name]) )
+
+    all_lick_times = []
+    if 'LickL' in Event and 'Time_S' in Event['LickL'] and Event['LickL']['Time_S']:
+        all_lick_times.extend([t/time_scale for t in Event['LickL']['Time_S']])
+    if 'LickR' in Event and 'Time_S' in Event['LickR'] and Event['LickR']['Time_S']:
+        all_lick_times.extend([t/time_scale for t in Event['LickR']['Time_S']])
+    all_lick_times.sort()
+
+    reward_lick_counts, noreward_lick_counts = [], []
+    for i in range(len(filtered_events)-1):
+        curr_ts, curr_type = filtered_events[i]
+        next_ts, _ = filtered_events[i+1]
+        start_idx = np.searchsorted(all_lick_times, curr_ts, side='left')
+        end_idx = np.searchsorted(all_lick_times, next_ts, side='left')
+        lick_count = end_idx - start_idx
+        
+        if curr_type == 'reward':
+            reward_lick_counts.append(lick_count)
+        else:
+            noreward_lick_counts.append(lick_count)
+
+    avg_licks_reward = np.mean(reward_lick_counts) if reward_lick_counts else 0
+    avg_licks_noreward = np.mean(noreward_lick_counts) if noreward_lick_counts else 0
+    total_lick_events = len(reward_lick_counts) + len(noreward_lick_counts)
+
+    return avg_licks_reward, avg_licks_noreward, total_lick_events
