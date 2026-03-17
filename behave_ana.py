@@ -76,11 +76,11 @@ def transform_sequence(eve_list):
             break
     if not find_mod:
         current_correct_side='L'
-    for _,event in eve_list:
+    for ts,event in eve_list:
         if event == 'Blackhole_S':
             in_blackhole = True
             current_correct_side=None
-            trial_sequence.append((False,'E',False))
+            trial_sequence.append((ts,False,'E',False))
             continue
         
         if event == 'Blackhole_E':
@@ -101,7 +101,7 @@ def transform_sequence(eve_list):
             choice = event[-1]  # 'L' 或 'R'
             result = True if event.startswith('Sln') else False
             is_correct = (choice == current_correct_side)
-            trial_sequence.append((is_correct, current_correct_side,result))
+            trial_sequence.append((ts,is_correct, current_correct_side,result))
     
     return trial_sequence
 
@@ -115,13 +115,13 @@ def accuracy_rate(eve_list,window=(0,-1)):
         tuple(int,int,int):左右总体的正确比例
     """
     LC, LW, RC, RW = 0, 0, 0, 0
-    tr_eve_list=transform_sequence(eve_list)  #(is_correct, correct_side,reward_or_not)
+    trial_sequence=transform_sequence(eve_list)  #(is_correct, correct_side,reward_or_not)
     count=0
     if window[1]==-1:
-        tr_eve_list=[tr_eve_list[i] for i in range(window[0],len(tr_eve_list))]
+        trial_sequence=[trial_sequence[i] for i in range(window[0],len(trial_sequence))]
     else:
-        tr_eve_list=[tr_eve_list[i] for i in range(window[0],min(len(tr_eve_list),window[1]))]
-    for is_correct, correct_side,_ in tr_eve_list:
+        trial_sequence=[trial_sequence[i] for i in range(window[0],min(len(trial_sequence),window[1]))]
+    for _,is_correct, correct_side,_ in trial_sequence:
         if correct_side == 'L':
             if is_correct:
                 LC += 1
@@ -133,7 +133,7 @@ def accuracy_rate(eve_list,window=(0,-1)):
             else:
                 RW += 1
     if window[1] != -1:
-        if len(tr_eve_list) < window[1]-window[0]:
+        if len(trial_sequence) < window[1]-window[0]:
             return None,None,None
     # 计算正确率
     L = LC / (LC + LW) if (LC + LW) > 0 else 0
@@ -157,7 +157,7 @@ def analyze_switching_patterns(trial_sequence):
     switch_pattern = []
     count = 0
     current_state=False #默认是错误边开始
-    for is_correct, correct_side in trial_sequence:
+    for _,is_correct, _,_ in trial_sequence:
         count += 1
         # 检测模式切换
         if is_correct != current_state:
@@ -287,7 +287,7 @@ def switch_bayes_reg(sw_seq,ns_seq):
     return weights,bias,acc
 
 def learning_auc(trial_sequence):
-    is_correct = np.array([t[0] for t in trial_sequence])
+    is_correct = np.array([t[1] for t in trial_sequence])
 
     cum_correct = np.cumsum(is_correct)
     trials = np.arange(1, len(is_correct) + 1)
@@ -330,47 +330,6 @@ def log_lr(eve_list, alpha=0.5):
 
 from bisect import bisect_left, bisect_right
 
-# def licking_rate(Event, eve_list):
-#     event_map = {'SlnL': 'reward','SlnR': 'reward','ROmL': 'noreward','ROmR': 'noreward'}
-#     valid_events = list(event_map.keys())
-    
-#     all_timestamps = [t for t, _ in eve_list]
-#     time_scale = 1000.0 if (len(all_timestamps) > 0 and max(all_timestamps) > 100000) else 1.0
-
-#     filtered_events = []
-#     for timestamp, eve_name in eve_list:
-#         if eve_name in valid_events:
-#             filtered_events.append( (timestamp/time_scale, event_map[eve_name]) )
-
-#     all_lick_times = []
-#     if 'LickL' in Event and 'Time_S' in Event['LickL'] and Event['LickL']['Time_S']:
-#         lickL_times = [t/time_scale for t in Event['LickL']['Time_S']]
-#         all_lick_times.extend(lickL_times)
-#     if 'LickR' in Event and 'Time_S' in Event['LickR'] and Event['LickR']['Time_S']:
-#         lickR_times = [t/time_scale for t in Event['LickR']['Time_S']]
-#         all_lick_times.extend(lickR_times)
-#     all_lick_times.sort()
-
-#     reward_lick_counts = []
-#     noreward_lick_counts = []
-#     for i in range(len(filtered_events)-1):
-#         curr_ts, curr_type = filtered_events[i]
-#         next_ts, _ = filtered_events[i+1]
-#         start_idx = bisect_left(all_lick_times, curr_ts)
-#         end_idx = bisect_left(all_lick_times, next_ts)
-#         lick_count = end_idx - start_idx
-        
-#         if curr_type == 'reward':
-#             reward_lick_counts.append(lick_count)
-#         else:
-#             noreward_lick_counts.append(lick_count)
-
-#     avg_licks_reward = np.mean(reward_lick_counts) if reward_lick_counts else 0
-#     avg_licks_noreward = np.mean(noreward_lick_counts) if noreward_lick_counts else 0
-#     total_lick_events = len(reward_lick_counts) + len(noreward_lick_counts)
-
-#     return avg_licks_reward, avg_licks_noreward, total_lick_events
-            
 
 def licking_rate(Event, eve_list):    
     event_map = {'SlnL':'reward', 'SlnR':'reward', 'ROmL':'noreward', 'ROmR':'noreward'}
