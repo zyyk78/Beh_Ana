@@ -1,0 +1,51 @@
+﻿raw,standard,note
+T9F,T9F,标准名（纯牛奶 9号）
+T7F,T7F,标准名（纯牛奶 7号）
+P9F,P9F,标准名（pretraining）
+P7F,P7F,标准名（pretraining）
+F9F,F9F,标准名（豆奶 9号）
+F7F,F7F,标准名（豆奶 7号）
+T7W,T7W,标准名（water 7号）
+F7W,F7W,标准名（water 7号）
+T9W,T9W,标准名（water 9号，2026-09起 washout 期）
+F9W,F9W,标准名（water 9号，2026-10起 washout 期）
+Alm25p7F,m25p7F,合并 Alm/Arm → m
+Arm25p7F,m25p7F,合并 Alm/Arm → m
+Alm25p9F,m25p9F,合并 Alm/Arm → m
+Arm25p9F,m25p9F,合并 Alm/Arm → m
+Alm50p7F,m50p7F,合并 Alm/Arm → m
+Arm50p7F,m50p7F,合并 Alm/Arm → m
+Alm50p9F,m50p9F,合并 Alm/Arm → m
+Arm50p9F,m50p9F,合并 Alm/Arm → m
+Alm12p7F,m12p7F,合并 Alm/Arm → m
+Arm12p7F,m12p7F,合并 Alm/Arm → m
+Alm12p9F,m12p9F,合并 Alm/Arm → m
+Arm12p9F,m12p9F,合并 Alm/Arm → m
+Alm0p7F,m0p7F,合并 Alm/Arm → m
+Arm0p7F,m0p7F,合并 Alm/Arm → m
+Alm0p9F,m0p9F,合并 Alm/Arm → m
+Arm0p9F,m0p9F,合并 Alm/Arm → m
+Arm75p7F,m75p7F,75% 浓度（2026-10-20 起）
+Alm25P7F,m25p7F,笔误：P→p
+Arm25P7F,m25p7F,笔误：P→p
+Alm25P9F,m25p9F,笔误：P→p
+Arm25P9F,m25p9F,笔误：P→p
+Alm50P7F,m50p7F,笔误：P→p
+Arm50P7F,m50p7F,笔误：P→p
+Alm50P9F,m50p9F,笔误：P→p
+Arm50P9F,m50p9F,笔误：P→p
+Arm75P7F,m75p7F,笔误：P→p
+Arc7F,Ac7F,Ac 系列别名（3-main 既有规则）
+Alc7F,Ac7F,Ac 系列别名（3-main 既有规则）
+Ac7F,Ac7F,标准名
+T8F,T8F,MPtest G 批次 8%
+F8F,F8F,MPtest G 批次 8%
+T5F,T5F,MPtest B 批次 5%
+T5,T5F,笔误：缺 F
+T6F,T6F,D04/D06 transitional（README 未记）
+D7F,D7F,MPtest B 批次（README 未记）
+Am7W,Alm7W,笔误：缺 l（MPtest G 批次 washout）
+Alm7W,Alm7W,标准名
+R,R,MPtest B02 2025-07-21 调试记录（建议分析时剔除）
+02,00,合并产物名里的段号（合并文件命名修复后不再出现）
+00,00,Stage3/MPtest 早期未命名（README 缺失）

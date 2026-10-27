@@ -1,0 +1,72 @@
+wing: beh_ana_j
+
+rooms:
+  - name: data_pipeline
+    keywords:
+      - pkl
+      - pickle
+      - Event
+      - ParseEvent
+      - fixing
+      - log_processer
+      - align_time
+      - dtw
+      - com_Event
+      - 数据加载
+      - 解析
+
+  - name: analyzer
+    keywords:
+      - BehaviorDataAnalyzer
+      - filter_data
+      - compare_and_plot
+      - compare_multiple_groups
+      - find_switch_sequence
+      - behave_ana
+      - Treatment
+      - Mouse_ID
+      - analyzer
+      - DataFrame
+
+  - name: visualization
+    keywords:
+      - training_convergence
+      - plot
+      - matplotlib
+      - seaborn
+      - figure
+      - axhline
+      - 绘图
+      - 可视化
+      - colorblind
+      - paul_tol
+      - panel
+
+  - name: experiment
+    keywords:
+      - C05
+      - C06
+      - T7F
+      - T9F
+      - F9F
+      - F9W
+      - "977"
+      - "799"
+      - 鼠
+      - mouse
+      - 实验
+      - reward
+      - lick
+
+  - name: debugging
+    keywords:
+      - error
+      - traceback
+      - 报错
+      - 错误
+      - debug
+      - ambiguous
+      - 修复
+      - 排查
+      - bug
+      - exception

@@ -8,21 +8,28 @@ def sort_events(Event,ignore_list=[],long_event=[]):
         long_event (list, optional): "长事件"列表(需要完整记录开始和结束时间,Event_S和Event_E标记),否则只记录开始时间
     Returns:
         eve_list(list): 返回排序好的事件list,其中包括[timestamp,事件名称]
-    """    
+    """
     eve_list=[]
     for i in Event:
-        if not i in ignore_list:
-            if 'Time_S' in Event[i] and 'Time_E' in Event[i] :
-                if i in long_event:
-                    for timestamp in Event[i]['Time_S']:
-                        eve_list.append((timestamp,i+'_S'))
-                    for timestamp in Event[i]['Time_E']:
-                        eve_list.append((timestamp,i+'_E'))    
-                else:
-                    for timestamp in Event[i]['Time_S']:
-                        eve_list.append((timestamp,i))    
+        # 防御：跳过非字符串 key（脏 pkl 里偶尔会有 numpy array 当 key 的情况）
+        if not isinstance(i, str):
+            continue
+        if i in ignore_list:
+            continue
+        # 防御：value 必须含 Time_S / Time_E，否则跳过
+        v = Event[i]
+        if not isinstance(v, dict) or 'Time_S' not in v or 'Time_E' not in v:
+            continue
+        if i in long_event:
+            for timestamp in v['Time_S']:
+                eve_list.append((timestamp,i+'_S'))
+            for timestamp in v['Time_E']:
+                eve_list.append((timestamp,i+'_E'))
+        else:
+            for timestamp in v['Time_S']:
+                eve_list.append((timestamp,i))
     eve_list.sort(key=lambda x: x[0])
-    
+
     return eve_list
 
 def reward_rate(Event,window=(0,-1)):
@@ -68,6 +75,7 @@ def transform_sequence(eve_list):
     """
     trial_sequence = []
     current_correct_side = None
+    last_correct_side = None  # 最后一次有效 Mod 的方向（黑洞结束后恢复用）
     in_blackhole = False
     find_mod=False
     for _,event in eve_list:
@@ -85,6 +93,13 @@ def transform_sequence(eve_list):
         
         if event == 'Blackhole_E':
             in_blackhole = False
+            # 修复：黑洞结束后恢复正确侧。原版把 current_correct_side 置 None 后
+            # 只有等下一个 Mod 才会恢复；无 Mod(或 Mod 稀疏)的 session 在黑洞之后
+            # 的所有 trial 都会被丢弃(曾导致 6 个 session 被误当空段、222 个被截断)。
+            if current_correct_side is None:
+                # 整个 session 从未出现过 Mod：恢复默认 'L'；
+                # 出现过 Mod：恢复最后一个黑洞之前的 Mod 方向。
+                current_correct_side = 'L' if not find_mod else (last_correct_side or current_correct_side)
             continue
         
         if in_blackhole:
@@ -92,6 +107,7 @@ def transform_sequence(eve_list):
         
         if event.startswith('Mod'):
             current_correct_side = event[-1]  # 'L' 或 'R'
+            last_correct_side = current_correct_side
             continue
         
         if current_correct_side is None:
@@ -289,13 +305,17 @@ def switch_bayes_reg(sw_seq,ns_seq):
 def learning_auc(trial_sequence):
     is_correct = np.array([t[0] for t in trial_sequence])
 
+    if len(is_correct) == 0:
+        # 没有可分析 trial（例如所有事件都在 Blackhole 内，或 Mod 后无决策事件）
+        return np.nan
+
     cum_correct = np.cumsum(is_correct)
     trials = np.arange(1, len(is_correct) + 1)
 
     cum_accuracy = cum_correct / trials
     x = trials / trials[-1]  # 归一化到 [0,1]
 
-    auc = np.trapz(cum_accuracy, x)
+    auc = np.trapezoid(cum_accuracy, x)
     return auc
 
 def cumulative_attempt_auc(eve_list):
@@ -317,7 +337,7 @@ def cumulative_attempt_auc(eve_list):
     y = np.arange(1, len(times) + 1)    # 累计尝试数
     y = y / y[-1]                       # 归一化累计尝试
 
-    auc = np.trapz(y, x)
+    auc = np.trapezoid(y, x)
     return auc
 
 def log_lr(eve_list, alpha=0.5):

@@ -245,7 +245,11 @@ def remove_outliers_iqr(
     method: str = "per_ordinal",   # "per_ordinal" | "overall" | "per_mouse"
     iqr_k: float = 1.5,
 ) -> pd.DataFrame:
-    """IQR 离群点过滤。
+    """IQR 离群点**标记**（不删除行）。
+
+    返回的 df 带有 ``_is_outlier`` 列（True=离群）。调用方用
+    ``df[~df["_is_outlier"]]`` 自行过滤；或保留全部行以便在画个体鼠折线时
+    把离群点用虚线 + 红 X 标记出来，保证单鼠数据完整可视化。
 
     Parameters
     ----------
@@ -256,11 +260,15 @@ def remove_outliers_iqr(
         - "overall"      ：跨所有 Ordinal 一次性 IQR
         - "per_mouse"    ：每只鼠自己 IQR
     iqr_k     : 1.5（标准 Tukey fence）
+
+    Returns
+    -------
+    df : 原 df 副本，新增 ``_is_outlier`` bool 列
     """
-    if method is None or method == "none":
-        return df
     df = df.copy()
     df["_is_outlier"] = False
+    if method is None or method == "none":
+        return df
 
     for metric in metrics:
         if metric not in df.columns:
@@ -288,7 +296,7 @@ def remove_outliers_iqr(
             mask = (grp[metric] < lo) | (grp[metric] > hi)
             df.loc[mask[mask].index, "_is_outlier"] = True
 
-    return df[~df["_is_outlier"]].drop(columns=["_is_outlier"])
+    return df  # 保留 _is_outlier 列；调用方用 ~df["_is_outlier"] 自行过滤
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +390,7 @@ def plot_training_convergence(
     max_ordinal: Optional[int] = None,
     title_template: Optional[str] = None,
     show_individual: bool = True,
+    show_outliers: bool = True,
     outlier_method: Optional[str] = "per_ordinal",   # None = 不去除
     outlier_iqr_k: float = 1.5,
     min_mice_per_ordinal: int = 1,
@@ -409,6 +418,9 @@ def plot_training_convergence(
     title_template  : 标题模板，可用 `{treatment}` `{metric}` 占位；
                       None 时默认 "{treatment} — {metric} over Training"
     show_individual : 是否画每只鼠的淡色细线
+    show_outliers   : 是否在个体鼠折线上**可视化**离群点（虚线连接 + 红 X 标记）；
+                      True（默认）显示；False 时只画实线穿过正常点，离群段留空。
+                      注意：均值的离群点剔除（由 outlier_method 控制）不受此开关影响。
     outlier_method  : None / 'per_ordinal' / 'overall' / 'per_mouse'
     outlier_iqr_k   : 1.5 = 标准 Tukey fence
     min_mice_per_ordinal : 至少几只鼠贡献才画均值（少于则跳过该 ordinal）
@@ -432,17 +444,23 @@ def plot_training_convergence(
             print(f"⚠️  没有 Treatment={treatment} 的数据")
         return {}, ordinal_df, pd.DataFrame()
 
-    # 离群点去除
+    # 离群点标记：保留 _is_outlier 标志，让个体鼠折线能把离群点用虚线+红X画出来
+    # 但均值/SE 仍按"干净"数据计算
     if outlier_method is not None:
         n_before = len(ordinal_df)
-        ordinal_df = remove_outliers_iqr(
+        ordinal_df_full = remove_outliers_iqr(
             ordinal_df, metrics,
             method=outlier_method, iqr_k=outlier_iqr_k,
         )
-        n_removed = n_before - len(ordinal_df)
+        n_removed = int(ordinal_df_full["_is_outlier"].sum())
         if n_removed > 0 and verbose:
-            print(f"  [IQR] 去除离群点 {n_removed} 个 "
+            print(f"  [IQR] 标记 {n_removed} 个离群点 "
                   f"({outlier_method}, k={outlier_iqr_k})")
+        # 摘要/均值用的"干净"版（剔除 outlier）
+        ordinal_df = ordinal_df_full[~ordinal_df_full["_is_outlier"]].drop(columns=["_is_outlier"])
+    else:
+        ordinal_df_full = ordinal_df.copy()
+        ordinal_df_full["_is_outlier"] = False
 
     # 至少 N 只鼠贡献
     if min_mice_per_ordinal > 1:
@@ -474,22 +492,52 @@ def plot_training_convergence(
 
         fig, ax = plt.subplots(figsize=FIGSIZE, facecolor="white")
 
-        # 1) 个体鼠淡灰细线
+        # 1) 个体鼠淡灰细线 —— 离群点用虚线连接 + 红 X 标记，保证单鼠数据完整
         if show_individual:
-            for _, (mid, grp) in enumerate(ordinal_df.groupby("Mouse_ID")):
+            _outlier_label_added = False  # 仅第一个 outlier 散点进图例
+            for _, (mid, grp) in enumerate(ordinal_df_full.groupby("Mouse_ID")):
                 grp_m = grp.dropna(subset=[metric])
                 grp_m = grp_m[grp_m[metric] != 0]
                 if grp_m.empty:
                     continue
                 grp_m = grp_m.sort_values("Ordinal")
-                ax.plot(
-                    grp_m["Ordinal"], grp_m[metric],
-                    color=NATURE_PALETTE["light"],
-                    alpha=0.55, lw=1.2, marker='o', ms=5,
-                    markerfacecolor='white', markeredgewidth=0.9,
-                    markeredgecolor=NATURE_PALETTE["light"],
-                    zorder=3,
-                )
+
+                # 1a) 完整轨迹：虚线穿过**所有**点（含 outlier）—— 仅在 show_outliers=True 时画
+                if show_outliers:
+                    ax.plot(
+                        grp_m["Ordinal"], grp_m[metric],
+                        color=NATURE_PALETTE["light"],
+                        alpha=0.55, lw=1.2, marker='o', ms=5,
+                        markerfacecolor='white', markeredgewidth=0.9,
+                        markeredgecolor=NATURE_PALETTE["light"],
+                        linestyle='--',   # 虚线：完整轨迹
+                        zorder=2,
+                    )
+
+                # 1b) 正常段：实线覆盖在虚线之上（被剔除的 outlier 段保留为虚线/留空）
+                normal_m = grp_m[~grp_m["_is_outlier"]]
+                if not normal_m.empty:
+                    ax.plot(
+                        normal_m["Ordinal"], normal_m[metric],
+                        color=NATURE_PALETTE["light"],
+                        alpha=0.75, lw=1.2, marker='o', ms=5,
+                        markerfacecolor='white', markeredgewidth=0.9,
+                        markeredgecolor=NATURE_PALETTE["light"],
+                        linestyle='-',   # 实线：非离群段
+                        zorder=3,
+                    )
+
+                # 1c) 离群点：红 X 标记（仅第一个进入图例，避免 24 只鼠刷屏）—— 受 show_outliers 控制
+                if show_outliers:
+                    outliers_m = grp_m[grp_m["_is_outlier"]]
+                    if not outliers_m.empty:
+                        ax.scatter(
+                            outliers_m["Ordinal"], outliers_m[metric],
+                            color='#D62728', marker='x', s=80, lw=2.0,
+                            alpha=0.9, zorder=4,
+                            label='Outlier (IQR)' if not _outlier_label_added else "_nolegend_",
+                        )
+                        _outlier_label_added = True
 
         # 2) 跨鼠均值 ± SE（粗实线 + 误差棒，按指标语义色）
         ax.errorbar(
@@ -605,6 +653,7 @@ def show_in_notebook(
     ordinal_mode: str = "block",
     max_ordinal: Optional[int] = None,
     show_individual: bool = True,
+    show_outliers: bool = True,
     outlier_method: Optional[str] = "per_ordinal",
     outlier_iqr_k: float = 1.5,
     min_mice_per_ordinal: int = 1,
@@ -614,6 +663,7 @@ def show_in_notebook(
     save_dpi: int = 300,
     title_template: Optional[str] = None,
     verbose: bool = False,
+    print_mice_per_ordinal: bool = True,
 ):
     """在 notebook cell 中依次显示**每个 metric 一张独立 8×5 图**。
 
@@ -626,6 +676,8 @@ def show_in_notebook(
     save_dpi   : PNG 分辨率（默认 300 dpi）
     verbose    : True 时打印每只鼠的 ordinal 分布、每张图的保存路径与大小；
                  False（默认）只打印一行 header + summary 表格 + 一行保存汇总
+    print_mice_per_ordinal : True 时按 metric 打印每个 ordinal（iteration）下
+                 贡献样本的 mouse_id 列表（即该 iteration 的灰线/均值都用了哪些鼠）。
     """
     import base64
     import io
@@ -636,6 +688,7 @@ def show_in_notebook(
         filtered_df, treatment, metrics,
         ordinal_mode=ordinal_mode, max_ordinal=max_ordinal,
         show_individual=show_individual,
+        show_outliers=show_outliers,
         outlier_method=outlier_method,
         outlier_iqr_k=outlier_iqr_k,
         min_mice_per_ordinal=min_mice_per_ordinal,
@@ -656,6 +709,21 @@ def show_in_notebook(
     #         print(f"    {mid}: {n} 次")
     # print()
     # print(summary.to_string(index=False))
+
+    # 按 metric 打印每个 ordinal（iteration）下贡献样本的 mouse_id
+    if print_mice_per_ordinal and not summary.empty:
+        print(f"\n[Per-Ordinal Mice] treatment = {treatment}, "
+              f"mode = {ordinal_mode}  ·  {len(metrics)} metrics")
+        for metric in metrics:
+            sub = (summary[summary["Metric"] == metric]
+                   .sort_values("Ordinal"))
+            if sub.empty:
+                print(f"\n── {metric} ──  (无数据)")
+                continue
+            print(f"\n── {metric} ──  ({len(sub)} ordinals)")
+            for _, r in sub.iterrows():
+                print(f"  Ord {int(r['Ordinal']):>3}  N={int(r['N']):>2}  "
+                      f"mice: {r['Mice']}")
 
     # 保存
     if save_dir is not None:
@@ -710,3 +778,316 @@ if __name__ == "__main__":
     print("  - build_ordinal_table(...)")
     print("  - summarize_by_ordinal(...)")
     print("  - remove_outliers_iqr(..., method='per_ordinal')")
+
+# ---------------------------------------------------------------------------
+#  逐鼠训练轨迹（per-mouse training trajectories）
+# ---------------------------------------------------------------------------
+def plot_mouse_trajectories(
+    filtered_df: pd.DataFrame,
+    metrics: Sequence[str],
+    ordinal_mode: str = "cumulative",   # 'cumulative'=跨段累加编号; 'block'=同段内重编号; 'session'=全数据集按日期排 session 序
+    highlight_outliers: bool = True,
+    outlier_iqr_k: float = 3.0,
+    width: int = 900,
+    height_per_metric: int = 260,
+    save_dir: Optional[str] = None,
+    save_name: Optional[str] = None,
+    save_dpi: int = 300,
+    title: Optional[str] = None,
+    verbose: bool = False,
+):
+    """按训练次序对齐、每只鼠一条折线，直观查看单鼠异常波动（不做收敛/均值）。
+
+    Parameters
+    ----------
+    filtered_df : filter_data(...) 的输出（需含 Mouse_ID / Treatment / Date_Parsed）
+    metrics     : 要画的指标列名列表（自动适配 Reward Rate/Accuracy 等别名）
+    ordinal_mode:
+        'session'    —— 所有行按日期统一编 Session 序（含不同 treatment，适合看整条训练史）
+        'cumulative' —— 与收敛图一致：只对 target treatment 累加编号（但此处不过滤 treatment，
+                        仍用全部行编号；对齐多 treatment 混合时用这个）
+        'block'      —— 同 treatment 连续段内重编号（段间会重置）
+    highlight_outliers : 用 IQR(k=outlier_iqr_k) 把单鼠某次的离群点画成红色圆点
+    save_dir/save_name : 可选，保存 PNG+SVG
+
+    Returns
+    -------
+    (fig, tidy_df) : 图 与 整理后的明细表（含 Mouse_ID/Date/Treatment/Ordinal/各 metric）
+    """
+    import os
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from matplotlib.lines import Line2D
+
+    df = filtered_df.copy()
+    # 指标列别名适配（与 notebook 口径一致）
+    for alias, src in [("Reward Rate", "Reward Ratio"),
+                       ("Switch Latency", "Switching Latency")]:
+        if alias not in df.columns and src in df.columns:
+            df[alias] = df[src]
+    metrics = [m for m in metrics if m in df.columns]
+    if not metrics:
+        raise ValueError(f"metrics 里没有任何一列存在于数据: {metrics}")
+
+    # ---- 编号 ----
+    if ordinal_mode == "session":
+        df = df.dropna(subset=["Date_Parsed"]).sort_values(["Mouse_ID", "Date_Parsed"]).copy()
+        df["Ordinal"] = df.groupby("Mouse_ID").cumcount() + 1
+    elif ordinal_mode == "cumulative":
+        df = df.dropna(subset=["Date_Parsed"]).sort_values(["Mouse_ID", "Date_Parsed"]).copy()
+        df["Ordinal"] = df.groupby("Mouse_ID").cumcount() + 1
+    elif ordinal_mode == "block":
+        # 真正的 block：按日期排序后，连续相同的 treatment 才是同一段；段内从 1 编号
+        df = df.dropna(subset=["Date_Parsed"]).sort_values(["Mouse_ID", "Date_Parsed"]).copy()
+        is_new = df["Treatment"].ne(df["Treatment"].groupby(df["Mouse_ID"]).shift())
+        df["_blk"] = is_new.groupby(df["Mouse_ID"]).cumsum()
+        df["Ordinal"] = df.groupby(["Mouse_ID", "_blk"]).cumcount() + 1
+        df = df.drop(columns=["_blk"])
+    else:
+        raise ValueError("ordinal_mode 只能是 'session' | 'cumulative' | 'block'")
+
+    # 同鼠同天重复行 → 当日均值（一次训练一行）
+    agg = df.groupby(["Mouse_ID", "Date_Parsed"], as_index=False).agg(
+        {**{m: "mean" for m in metrics}, **{"Ordinal": "first", "Treatment": "first"}}
+    )
+    agg = agg.sort_values(["Mouse_ID", "Ordinal"])
+
+    # ---- 离群标记（按 metric 的整体 IQR）----
+    flags = pd.DataFrame(False, index=agg.index, columns=metrics)
+    if highlight_outliers:
+        for m in metrics:
+            v = agg[m].astype(float)
+            q1, q3 = v.quantile(0.25), v.quantile(0.75)
+            iqr = q3 - q1
+            lo, hi = q1 - outlier_iqr_k * iqr, q3 + outlier_iqr_k * iqr
+            flags[m] = (v < lo) | (v > hi)
+
+    # ---- 画图：每 metric 一行子图，X=Ordinal，每鼠一折线 ----
+    mice = sorted(agg["Mouse_ID"].astype(str).unique())
+    palette = sns.color_palette("tab10", n_colors=max(len(mice), 1))
+    color_map = {m: palette[i % len(palette)] for i, m in enumerate(mice)}
+
+    max_ord = int(agg["Ordinal"].max())
+    fig, axes = plt.subplots(len(metrics), 1,
+                             figsize=(width/100, height_per_metric*len(metrics)/100),
+                             sharex=True, dpi=100)
+    if len(metrics) == 1:
+        axes = [axes]
+    _apply_show_style()
+
+    for ax, m in zip(axes, metrics):
+        for mid, g in agg.groupby("Mouse_ID"):
+            g = g.sort_values("Ordinal")
+            ax.plot(g["Ordinal"], g[m].astype(float), "-o", ms=3.2, lw=1.1,
+                    color=color_map[mid], alpha=0.85, label=mid)
+            if highlight_outliers:
+                out = g[flags.loc[g.index, m]]
+                if len(out):
+                    ax.scatter(out["Ordinal"], out[m].astype(float), s=26,
+                               facecolor="none", edgecolor="red", lw=1.4, zorder=5)
+        ax.set_ylabel(m, fontsize=10, fontweight="bold")
+        ax.grid(axis="y", ls=":", alpha=0.4)
+        # 次序刻度取整数
+        ax.set_xticks(range(1, max_ord + 1))
+    axes[-1].set_xlabel("Training session #", fontsize=11, fontweight="bold")
+    if title:
+        axes[0].set_title(title, fontsize=13, fontweight="bold")
+    # 图例：一只鼠一个颜色
+    handles = [Line2D([0], [0], color=color_map[m], lw=2, marker="o", ms=4, label=m) for m in mice]
+    axes[0].legend(handles=handles, ncol=min(len(mice), 12), fontsize=7,
+                   loc="upper center", bbox_to_anchor=(0.5, 1.35), frameon=False)
+    fig.tight_layout()
+
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        name = save_name or "mouse_trajectories"
+        png = os.path.join(save_dir, name + ".png")
+        svg = os.path.join(save_dir, name + ".svg")
+        fig.savefig(png, dpi=save_dpi, bbox_inches="tight", facecolor="white")
+        fig.savefig(svg, bbox_inches="tight", facecolor="white")
+        if verbose:
+            print("saved:", png, "|", svg)
+
+    tidy = agg[["Mouse_ID", "Date_Parsed", "Treatment", "Ordinal"] + metrics].copy()
+    for m in metrics:
+        tidy[m + "_outlier"] = flags[m].values
+    if verbose:
+        n_out = int(sum(flags[m].sum() for m in metrics))
+        print(f"[Mouse Trajectories] {len(mice)} mice x max {max_ord} sessions; {n_out} outliers (red circles)")
+    return fig, tidy
+
+
+
+# ---------------------------------------------------------------------------
+#  Single-session activity reconstruction (per mouse, one day)
+# ---------------------------------------------------------------------------
+def plot_session_activity(
+    pkl_path: str,
+    bin_s: float = 60.0,
+    show_lick_raster: bool = True,
+    lick_raster_max: int = 4000,
+    save_dir: Optional[str] = None,
+    save_name: Optional[str] = None,
+    save_dpi: int = 300,
+    verbose: bool = True,
+):
+    """Reconstruct one session's full activity timeline for a single mouse.
+
+    Layout (top -> bottom):
+      1. Reward/omission event rate per bin (SlnL/SlnR up, ROmL/ROmR down)
+      2. Mod phases (correct side L/R) as colored background spans
+      3. Blackhole intervals as gray spans
+      4. Lick raster (optional; left/right ticks) — subsampled if too many
+      5. Miniscope frames per bin (recording coverage)
+
+    Returns (fig, summary_df) where summary_df has per-bin counts.
+    """
+    import pickle
+    import os
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+
+    FS = 50000.0
+    with open(pkl_path, "rb") as f:
+        Ev = pickle.load(f)
+    if not isinstance(Ev, dict):
+        raise ValueError("not a behavior pkl (top-level not dict)")
+
+    all_ts = [t for k, v in Ev.items()
+              if isinstance(k, str) and isinstance(v, dict) and v.get("Time_S")
+              for t in v["Time_S"]]
+    if not all_ts:
+        raise ValueError("session has no events")
+    t0, t1 = min(all_ts), max(all_ts)
+    dur = (t1 - t0) / FS
+    nbin = max(int(np.ceil(dur / bin_s)), 1)
+
+    def rel(ts):
+        return [(t - t0) / FS for t in (ts or [])]
+
+    def binned(ts):
+        b = np.zeros(nbin)
+        for t in rel(ts):
+            i = min(int(t // bin_s), nbin - 1)
+            b[i] += 1
+        return b
+
+    g = {k: binned(Ev[k]["Time_S"]) for k in
+         ("SlnL", "SlnR", "ROmL", "ROmR", "LickL", "LickR", "MinS")
+         if k in Ev}
+    for k in ("SlnL", "SlnR", "ROmL", "ROmR", "LickL", "LickR", "MinS"):
+        g.setdefault(k, np.zeros(nbin))
+
+    # Mod phases (correct side over time)
+    mod_pts = sorted([(t, "L") for t in rel(Ev.get("ModL", {}).get("Time_S") or [])]
+                     + [(t, "R") for t in rel(Ev.get("ModR", {}).get("Time_S") or [])])
+    phases = []
+    if mod_pts:
+        # side holds from its Mod event until the next Mod event
+        first_side = mod_pts[0][1]
+        if mod_pts[0][0] > 0:
+            phases.append((0.0, mod_pts[0][0], None))   # pre-first-Mod gap
+        for i, (t, side) in enumerate(mod_pts):
+            nxt = mod_pts[i + 1][0] if i + 1 < len(mod_pts) else dur
+            if nxt > t:
+                phases.append((t, nxt, side))
+    else:
+        phases.append((0.0, dur, None))
+
+    bh = list(zip(rel(Ev.get("Blackhole", {}).get("Time_S") or []),
+                  rel(Ev.get("Blackhole", {}).get("Time_E") or [])))
+
+    # ---- figure ----
+    n_rows = 4 if show_lick_raster else 3
+    heights = [3, 0.6, 0.6, 1.1][:n_rows]
+    fig, axes = plt.subplots(n_rows, 1, figsize=(14, 2.1 * sum(heights) + 1),
+                             sharex=True, gridspec_kw={"height_ratios": heights},
+                             dpi=100)
+
+    ax = axes[0]
+    x = np.arange(nbin) * bin_s + bin_s / 2
+    w = bin_s * 0.9
+    ax.bar(x, g["SlnL"], width=w, color="#2E7EB8", label="Reward Left (SlnL)")
+    ax.bar(x, g["SlnR"], width=w, color="#7FBFDE", bottom=g["SlnL"], label="Reward Right (SlnR)")
+    ax.bar(x, -g["ROmL"], width=w, color="#C44E52", label="Omit Left (ROmL)")
+    ax.bar(x, -g["ROmR"], width=w, color="#E8A0A2", bottom=-g["ROmR"], label="Omit Right (ROmR)")
+    ax.axhline(0, color="k", lw=0.8)
+    ax.set_ylabel("Events / bin")
+    ax.legend(loc="upper right", fontsize=8, ncol=2, framealpha=0.85)
+    ax.set_title(f"{os.path.basename(pkl_path)}  |  duration {dur/60:.1f} min  |  bin {bin_s:.0f}s",
+                 fontsize=12, fontweight="bold")
+
+    # correct-side spans + blackhole spans helper
+    def draw_phases(ax, y0=0.0, y1=1.0):
+        for a, b, side in phases:
+            c = "#BFE3C0" if side == "L" else ("#F6C9C4" if side == "R" else "#E8E8E8")
+            ax.axvspan(a, b, ymin=y0, ymax=y1, color=c, alpha=0.5, zorder=0)
+    def draw_bh(ax, y0=0.0, y1=1.0):
+        for a, b in bh:
+            ax.axvspan(a, b, ymin=y0, ymax=y1, color="gray", alpha=0.45, zorder=1)
+
+    draw_phases(ax); draw_bh(ax)
+
+    ax2 = axes[1]
+    draw_phases(ax2); draw_bh(ax2)
+    for t, side in mod_pts:
+        ax2.axvline(t, color="k", lw=1)
+    ax2.set_yticks([])
+    ax2.set_ylabel("Mod phase")
+
+    ax3 = axes[2]
+    draw_phases(ax3); draw_bh(ax3)
+    ax3.set_yticks([])
+    ax3.set_ylabel("Blackhole")
+
+    if show_lick_raster:
+        ax4 = axes[3]
+        draw_phases(ax4); draw_bh(ax4)
+        for k, row, c in (("LickL", 1, "#2E7EB8"), ("LickR", -1, "#C44E52")):
+            ts = rel(Ev[k]["Time_S"])
+            if len(ts) > lick_raster_max:
+                idx = np.linspace(0, len(ts) - 1, lick_raster_max).astype(int)
+                ts = [ts[i] for i in idx]
+            ax4.vlines(ts, 0, row * 0.8, color=c, lw=0.4, alpha=0.5)
+        ax4.set_ylim(-1, 1)
+        ax4.set_yticks([0.4, -0.4], ["Lick L", "Lick R"])
+        ax4.set_xlabel("Time in session (s)")
+
+    # Miniscope coverage: put on reward axis as thin line
+    if g["MinS"].sum() > 0:
+        ax_t = ax.twinx()
+        ax_t.plot(x, g["MinS"], color="#555555", lw=0.8, alpha=0.6)
+        ax_t.set_ylabel("Miniscope frames/bin", fontsize=8, color="#555555")
+        ax_t.tick_params(labelsize=7, colors="#555555")
+
+    sns_despine = True
+    for a in axes:
+        a.grid(axis="x", ls=":", alpha=0.3)
+    fig.tight_layout()
+
+    # ---- per-bin summary ----
+    import pandas as pd
+    summary = pd.DataFrame({
+        "bin_start_s": np.arange(nbin) * bin_s,
+        "SlnL": g["SlnL"], "SlnR": g["SlnR"],
+        "ROmL": g["ROmL"], "ROmR": g["ROmR"],
+        "LickL": g["LickL"], "LickR": g["LickR"],
+        "MinS": g["MinS"],
+    })
+
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        name = save_name or (os.path.basename(pkl_path).replace(".pkl", "") + "_activity")
+        fig.savefig(os.path.join(save_dir, name + ".png"), dpi=save_dpi,
+                    bbox_inches="tight", facecolor="white")
+        fig.savefig(os.path.join(save_dir, name + ".svg"), bbox_inches="tight", facecolor="white")
+        if verbose:
+            print(f"saved: {os.path.join(save_dir, name + '.png')}")
+
+    if verbose:
+        n_rew = int(g["SlnL"].sum() + g["SlnR"].sum())
+        n_om = int(g["ROmL"].sum() + g["ROmR"].sum())
+        print(f"Session: {dur/60:.1f} min | rewards {n_rew} (L {int(g['SlnL'].sum())} / R {int(g['SlnR'].sum())}) "
+              f"| omissions {n_om} | blackhole intervals {len(bh)} | mod switches {len(mod_pts)}")
+    return fig, summary

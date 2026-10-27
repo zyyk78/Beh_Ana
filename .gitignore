@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# notebooks 备份
+*.bak
+*.bak_*
+*.bak_before_*
+
+# 大文件 / 产物
+glme/glme_model.rds
+glme/glme_eval_model.rds
+glme/glme_eval_preds.csv
+*.xlsx
+
+# 输出
+output/
+merged_pkls/
+analysis_results_2*.csv
+pkl_health.csv
+pkl_report.csv
+mouse_pkl_status.csv
+anomaly_report.csv
+outliers_*.csv
