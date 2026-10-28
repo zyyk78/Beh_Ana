@@ -8,6 +8,12 @@ from scipy.signal import find_peaks
 from sklearn.metrics import confusion_matrix
 from scipy.optimize import linear_sum_assignment
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.preprocessing import StandardScaler
+
 
 def calculate_purity(data):
     shape=data.shape
@@ -279,3 +285,288 @@ def map_sorted_clusters(sorted_cluster, parent_classes):
         mapped_cluster.append(mapped)
 
     return mapped_cluster
+
+
+def cluster_matrix_hierarchical(tot_mix_data, max_features=20, n_clusters=2, metric='correlation', linkage_method='average'):
+    from scipy.cluster.hierarchy import linkage, fcluster, leaves_list
+    from scipy.spatial.distance import pdist
+    """
+    对细胞（行）进行聚类
+    """
+    X = tot_mix_data 
+    
+    dist_matrix = pdist(X, metric=metric)
+    
+    Z = linkage(dist_matrix, method=linkage_method)
+    
+    sorted_idx = leaves_list(Z)
+    
+    features = (n_clusters, X.shape[0]) 
+    
+    cluster = fcluster(Z, t=n_clusters, criterion='maxclust')
+    
+    return features, sorted_idx, cluster, Z
+
+def match_segments(eve_list,signal,gap_threshold=50000):
+    mins_events = [item for item in eve_list if item[1] in ['MinS_S', 'MinS_E']]
+    mins_events.sort(key=lambda x: x[0])  # 确保按时间戳升序
+
+    segments = []
+    current_segment = [mins_events[0]]
+
+    for i in range(1, len(mins_events)):
+        prev_ts = mins_events[i-1][0]
+        curr_ts = mins_events[i][0]
+        
+        if curr_ts - prev_ts > gap_threshold:
+            # 间隔超过1s，保存当前段，开启新段
+            segments.append(current_segment)
+            current_segment = [mins_events[i]]
+        else:
+            # 属于同一段
+            current_segment.append(mins_events[i])
+
+    # 别忘了添加最后一段
+    segments.append(current_segment)
+
+    # 3. 统计结果
+    print(f"检测完成：共发现 {len(segments)} 段记录。\n")
+    print(f"{'段落':<10} | {'开始时间':<15} | {'结束时间':<15} | {'持续帧数':<10}")
+    print("-" * 60)
+
+    most_like_seg=(None,np.inf)
+
+    for idx, seg in enumerate(segments):
+        start_ts = seg[0][0]
+        end_ts = seg[-1][0]
+        duration = len(seg)
+        delta=abs(duration-signal.shape[1])
+        if delta<10 and delta<most_like_seg[1]:
+            most_like_seg=(idx,delta)
+        print(f"Segment {idx+1:<2} | {start_ts:<15} | {end_ts:<15} | {duration:<10}")
+    print('Len of MS Record: ',signal.shape[1])
+    print('Dropped frams: ',most_like_seg[1])
+    print('Most like seq is: ',most_like_seg[0]+1)
+
+    for i in range(len(eve_list)):
+        if eve_list[0][0] < segments[most_like_seg[0]][0][0]:
+            eve_list.pop(0)
+        else:
+            break
+    for i in range(len(eve_list)):
+        if eve_list[-1][0] > segments[most_like_seg[0]][-1][0]:
+            eve_list.pop()
+        else:
+            break
+    if most_like_seg[1] >0:
+        insert_positions = np.sort(np.unique(np.random.randint(1, signal.shape[1] + 1, size=most_like_seg[1])))
+        new_signal = np.zeros((signal.shape[0], signal.shape[1] + most_like_seg[1]))
+        current_col = 0
+        for i in range(new_signal.shape[1]):
+            if i in insert_positions:
+                new_signal[:, i] = new_signal[:, i - 1]
+            else:
+                new_signal[:, i] = signal[:, current_col]
+                current_col += 1
+        signal=new_signal
+        print('已随机插入',most_like_seg[1],'帧用以补全丢帧')
+    return eve_list,signal
+
+class GLMDecoder:
+    def __init__(self, eve_list, signal):
+        self.eve_list = eve_list
+        self.signal = signal  # (nNeurons, nFrames)
+        self.df = self._prepare_trials()
+
+    def _prepare_trials(self):
+        trial_events = ['SlnL', 'SlnR', 'ROmL', 'ROmR']
+        ms_frames = np.array([t for t, e in self.eve_list if e in ('MinS_S', 'MinS_E')])
+
+        rows = []
+        for t, e in self.eve_list:
+            if e in trial_events:
+                f_idx = np.argmin(np.abs(ms_frames - t))
+                rows.append({
+                    'frame': f_idx,
+                    'choice': 1 if 'R' in e else 0,
+                    'reward': 1 if 'Sln' in e else 0
+                })
+
+        df = pd.DataFrame(rows)
+        df['prev_choice'] = df['choice'].shift(1)
+        df['prev_reward'] = df['reward'].shift(1)
+        return df.dropna().reset_index(drop=True)
+
+    def _get_window_feature(self, frames, window):
+        """
+        window: (start, end), e.g. (-12, 0)
+        return: (nTrials, nNeurons)
+        """
+        start, end = window
+        feats = []
+
+        for f in frames:
+            f = int(f)
+            if f + start < 0 or f + end > self.signal.shape[1]:
+                feats.append(np.zeros(self.signal.shape[0]))
+                continue
+
+            chunk = self.signal[:, f + start : f + end]
+            feats.append(chunk.mean(axis=1))  # 时间平均
+
+        return np.array(feats)
+
+    def fit(self, target_name='choice'):
+        targets = self.df[target_name].values
+        frames = self.df['frame'].values
+
+        windows = {
+            'pre':  (-12, 0),
+            'post': (1, 13),
+            'full': (-12, 13)
+        }
+
+        print(f"\n--- 解码目标: {target_name} ---")
+
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+        results = {}
+
+        for name, win in windows.items():
+            X = self._get_window_feature(frames, win)
+            X = StandardScaler().fit_transform(X)
+
+            clf = LogisticRegression(
+                penalty='l2',
+                solver='liblinear',
+                max_iter=1000
+            )
+
+            acc = cross_val_score(clf, X, targets, cv=cv).mean()
+            results[name] = acc
+            print(f"{name:5} window | Accuracy = {acc:.3f}")
+
+        return results
+
+
+def compute_place_fields(signal, pos_segment, chunknum=25, smooth_sigma=1.0, min_occupancy=5):
+    """
+    计算每个细胞的 place field
+
+    参数:
+        signal: 神经活动信号, 形状 (n_neurons, n_frames)
+        pos_segment: 位置坐标, 形状 (n_frames, 2), 分别是 x 和 y
+        chunknum: 空间分箱数
+        smooth_sigma: 高斯平滑 sigma
+        min_occupancy: 最小占据次数，只有某位置被访问超过此次数时才计算（排除偶然性放电）
+
+    返回:
+        place_fields: dict, 每个神经元的 place field 信息
+        place_scores: dict, 每个神经元的综合打分
+    """
+    from scipy.ndimage import gaussian_filter
+
+    # 1. 空间分箱设置
+    x_pos = pos_segment[:, 0]
+    y_pos = pos_segment[:, 1]
+    x_min, x_max = x_pos.min(), x_pos.max()
+    y_min, y_max = y_pos.min(), y_pos.max()
+
+    chunkScale_x = (x_max - x_min) / chunknum
+    chunkScale_y = (y_max - y_min) / chunknum
+
+    # 将坐标数字化为 bin 索引
+    x_indices = np.floor((x_pos - x_min) / chunkScale_x).astype(int)
+    y_indices = np.floor((y_pos - y_min) / chunkScale_y).astype(int)
+    x_indices = np.clip(x_indices, 0, chunknum - 1)
+    y_indices = np.clip(y_indices, 0, chunknum - 1)
+
+    # 2. 计算占据图 (Occupancy Map)
+    occupancy_map = np.zeros((chunknum, chunknum))
+    for x, y in zip(x_indices, y_indices):
+        occupancy_map[y, x] += 1
+
+    # 3. 计算每个细胞的 place field
+    num_neurons = signal.shape[0]
+    place_fields = {}
+    place_scores = {}
+
+    for neuron_id in range(num_neurons):
+        # 获取神经活动信号
+        activity_signal = signal[neuron_id, :].copy()
+
+        # 过滤负值
+        activity_signal[activity_signal < 0] = 0
+
+        # 计算累积图 (Spike Map)
+        spike_map = np.zeros((chunknum, chunknum))
+        for i in range(len(activity_signal)):
+            spike_map[y_indices[i], x_indices[i]] += activity_signal[i]
+
+        # 计算 Rate Map（排除偶然性放电：只有占据次数超过阈值的bin才计算）
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # 使用掩码：只有占据次数超过 min_occupancy 的位置才有效
+            valid_occupancy = np.where(occupancy_map >= min_occupancy, occupancy_map, np.nan)
+            rate_map = spike_map / valid_occupancy
+            rate_map[valid_occupancy == np.nan] = np.nan
+
+        # 高斯平滑
+        rate_map_filled = rate_map.copy()
+        rate_map_filled[np.isnan(rate_map_filled)] = 0
+        smoothed_map = gaussian_filter(rate_map_filled, sigma=smooth_sigma)
+
+        # 计算峰值
+        peak_rate = np.nanmax(smoothed_map)
+
+        # 计算打分（只考虑有效位置：占据次数 >= min_occupancy）
+        rate_map_flat = rate_map.flatten()
+        occupancy_flat = occupancy_map.flatten()
+        # 使用有效占据次数（>= min_occupancy）来计算概率
+        valid_occupancy_flat = np.where(occupancy_flat >= min_occupancy, occupancy_flat, 0)
+        total_valid_occupancy = valid_occupancy_flat.sum()
+
+        if total_valid_occupancy > 0 and peak_rate > 0:
+            p_i = valid_occupancy_flat / total_valid_occupancy  # 占据概率（只考虑有效位置）
+            r_i = rate_map_flat  # firing rate
+            r_mean = np.nansum(r_i * p_i)  # 平均 firing rate
+
+            # 过滤掉 NaN、0 和无效位置（占据次数 < min_occupancy）
+            valid_mask = ~np.isnan(r_i) & (occupancy_flat >= min_occupancy) & (r_i > 0)
+            if r_mean > 0 and valid_mask.sum() > 0:
+                # Spatial Information Score (bits/spike)
+                spatial_info = np.nansum(p_i[valid_mask] * r_i[valid_mask] *
+                                        np.log2(r_i[valid_mask] / r_mean)) / r_mean
+                # Sparsity
+                sparsity = 1 - (np.nansum(p_i[valid_mask] * r_i[valid_mask])**2 /
+                              np.nansum(p_i[valid_mask] * r_i[valid_mask]**2))
+            else:
+                spatial_info = 0
+                sparsity = 0
+
+            # Coherence (空间一致性)
+            if smoothed_map.shape[0] > 1 and smoothed_map.shape[1] > 1:
+                neighbors = smoothed_map[:, :-1].flatten(), smoothed_map[:, 1:].flatten()
+                horizontal_corr = np.corrcoef(neighbors[0], neighbors[1])[0, 1]
+                neighbors = smoothed_map[:-1, :].flatten(), smoothed_map[1:, :].flatten()
+                vertical_corr = np.corrcoef(neighbors[0], neighbors[1])[0, 1]
+                coherence = np.nanmean([horizontal_corr, vertical_corr])
+            else:
+                coherence = 0
+        else:
+            spatial_info = 0
+            sparsity = 0
+            coherence = 0
+
+        # 存储结果
+        place_fields[neuron_id] = {
+            'rate_map': smoothed_map,
+            'peak_rate': peak_rate,
+            'spatial_info': spatial_info,
+            'sparsity': sparsity,
+            'coherence': coherence
+        }
+
+        # 综合打分 (可自定义权重)
+        combined_score = spatial_info * 0.5 + sparsity * 0.3 + coherence * 0.2
+        place_scores[neuron_id] = combined_score
+
+    return place_fields, place_scores
