@@ -1,0 +1,5 @@
+thresh,Treatment,n_blocks,detected_pct,floorhit_pct,km_median,km_at_end_pct
+0.6,T7F,1222,96.2,42.6,32.0,0.0
+0.6,T9F,1245,97.3,56.4,29.0,0.0
+0.55,T7F,1222,98.2,47.1,31.0,0.0
+0.55,T9F,1245,98.6,61.5,29.0,0.0

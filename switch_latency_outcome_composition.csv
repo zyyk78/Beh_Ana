@@ -1,0 +1,5 @@
+thresh,Treatment,floorhit_pct,delayed_pct,censored_pct
+0.6,T7F,42.6,53.6,3.8
+0.6,T9F,56.4,41.0,2.7
+0.55,T7F,47.1,51.1,1.8
+0.55,T9F,61.5,37.0,1.4
